@@ -7,7 +7,6 @@
 #include <flood/out_stream.h>
 #include <flood/text_in_stream.h>
 #include <guise-client/client.h>
-#include <guise-client/network_realizer.h>
 #include <guise-serialize/parse_text.h>
 #include <imprint/default_setup.h>
 #include <inttypes.h>
