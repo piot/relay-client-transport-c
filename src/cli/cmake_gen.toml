@@ -1,0 +1,5 @@
+cmakegenversion = "0.0.0"
+artifact_type = 'executable'
+name = 'relay-client-transport-cli'
+sourcedirs = ["."]
+dependencies = ['relay-client-transport', 'udp-client']

@@ -1,0 +1,3 @@
+cmakegenversion = "0.0.0"
+artifact_type = 'library'
+sourcedirs = ["."]
