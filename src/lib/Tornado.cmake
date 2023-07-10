@@ -1,17 +1,20 @@
+macro(set_local_and_parent NAME VALUE)
+  set(${NAME} ${VALUE})
+  set(${NAME}
+      ${VALUE}
+      PARENT_SCOPE)
+endmacro()
+
 function(set_tornado targetName)
 
   target_compile_features(${targetName} PUBLIC c_std_99)
-  set(CMAKE_C_EXTENSIONS
-      false
-      PARENT_SCOPE)
+  set_local_and_parent(CMAKE_C_EXTENSIONS false)
 
   # --- Detect CMake build type, compiler and operating system ---
 
   if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     message("detected debug build")
-    set(isDebug
-        TRUE
-        PARENT_SCOPE)
+    set_local_and_parent(isDebug TRUE)
   else()
     message("detected release build")
     set(isDebug
@@ -40,17 +43,11 @@ function(set_tornado targetName)
   endif()
 
   if(APPLE)
-    set(OS_MACOS
-        TRUE
-        PARENT_SCOPE)
+    set_local_and_parent(OS_MACOS TRUE)
   elseif(UNIX)
-    set(OS_LINUX
-        TRUE
-        PARENT_SCOPE)
+    set_local_and_parent(OS_LINUX TRUE)
   elseif(WIN32)
-    set(OS_WINDOWS
-        TRUE
-        PARENT_SCOPE)
+    set_local_and_parent(OS_WINDOWS TRUE)
   endif()
 
   # ----- Set Compile options depending on compiler
@@ -105,19 +102,13 @@ function(set_tornado targetName)
 
   if(APPLE)
     target_compile_definitions(${targetName} PRIVATE TORNADO_OS_MACOS)
-    set(OS_MACOS
-        1
-        PARENT_SCOPE)
+    set_local_and_parent(OS_MACOS 1)
   elseif(UNIX)
     target_compile_definitions(${targetName} PRIVATE TORNADO_OS_LINUX)
-    set(OS_LINUX
-        1
-        PARENT_SCOPE)
+    set_local_and_parent(OS_LINUX 1)
   elseif(WIN32)
     target_compile_definitions(${targetName} PRIVATE TORNADO_OS_WINDOWS)
-    set(OS_WINDOWS
-        1
-        PARENT_SCOPE)
+    set_local_and_parent(OS_WINDOWS 1)
   endif()
 
   if(OS_LINUX)
