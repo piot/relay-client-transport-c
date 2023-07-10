@@ -6,7 +6,6 @@ add_library(relay-client-transport STATIC
 
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR})
-
 include(Tornado)
 set_tornado(relay-client-transport)
 
@@ -15,3 +14,4 @@ target_include_directories(relay-client-transport PUBLIC ../include)
 target_link_libraries(relay-client-transport 
   PUBLIC relay-client
   PUBLIC guise-client)
+

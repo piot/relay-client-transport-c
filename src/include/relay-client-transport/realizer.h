@@ -34,4 +34,8 @@ int relayClientTransportRealizerReInit(RelayClientTransportRealizer* self, Guise
                                        uint64_t secretPrivatePassword);
 int relayClientTransportRealizerUpdate(RelayClientTransportRealizer* self, MonotonicTimeMs now);
 
+RelayListener* relayClientTransportRealizerStartListen(RelayClientTransportRealizer* self,
+                                            RelaySerializeApplicationId applicationId,
+                                            RelaySerializeChannelId channelId);
+
 #endif

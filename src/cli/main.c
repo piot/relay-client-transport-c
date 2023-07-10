@@ -11,10 +11,11 @@
 #include <guise-serialize/parse_text.h>
 #include <imprint/default_setup.h>
 #include <inttypes.h>
+#include <relay-client-transport/realizer.h>
 #include <relay-client/client.h>
 #include <stdio.h>
-#include <udp-client/udp_client.h>
 #include <time.h>
+#include <udp-client/udp_client.h>
 
 clog_config g_clog;
 char g_clog_temp_str[CLOG_TEMP_STR_SIZE];
@@ -81,20 +82,16 @@ int main(int argc, char* argv[])
     g_clog.log = clog_console;
     g_clog.level = CLOG_TYPE_VERBOSE;
 
-    CLOG_VERBOSE("example start")
-    CLOG_VERBOSE("initialized")
+    CLOG_INFO("relay client transport cli")
 
     FldOutStream outStream;
 
     uint8_t buf[1024];
     fldOutStreamInit(&outStream, buf, 1024);
 
-    GuiseClientRealize clientRealize;
-    GuiseClientRealizeSettings settings;
-
     ImprintDefaultSetup memory;
 
-    DatagramTransport transportInOut;
+    DatagramTransport guiseTransport;
 
     imprintDefaultSetupInit(&memory, 16 * 1024 * 1024);
 
@@ -109,12 +106,18 @@ int main(int argc, char* argv[])
         hostToConnectTo = argv[1];
     }
 
-    UdpClientSocket udpClientSocket;
-    udpClientInit(&udpClientSocket, hostToConnectTo, 27004);
+    UdpClientSocket guiseUdpSocket;
+    udpClientInit(&guiseUdpSocket, hostToConnectTo, 27004);
+    guiseTransport.self = &guiseUdpSocket;
+    guiseTransport.receive = clientReceive;
+    guiseTransport.send = clientSend;
 
-    transportInOut.self = &udpClientSocket;
-    transportInOut.receive = clientReceive;
-    transportInOut.send = clientSend;
+    UdpClientSocket relayUdpSocket;
+    udpClientInit(&relayUdpSocket, hostToConnectTo, 27005);
+    DatagramTransport relayTransport;
+    relayTransport.self = &relayUdpSocket;
+    relayTransport.receive = clientReceive;
+    relayTransport.send = clientSend;
 
     Secret secret;
     int secretErr = readSecret(&secret);
@@ -123,41 +126,17 @@ int main(int argc, char* argv[])
         return secretErr;
     }
 
-    settings.memory = &memory.tagAllocator.info;
-    settings.transport = transportInOut;
-    settings.userId = secret.userId;
-    settings.secretPasswordHash = secret.passwordHash;
     Clog guiseClientLog;
     guiseClientLog.config = &g_clog;
     guiseClientLog.constantPrefix = "GuiseClient";
-    settings.log = guiseClientLog;
 
-    guiseClientRealizeInit(&clientRealize, &settings);
-    guiseClientRealizeReInit(&clientRealize, &settings);
+    RelayClientTransportRealizer clientRealize;
 
-    clientRealize.state = GuiseClientRealizeStateInit;
-    clientRealize.targetState = GuiseClientRealizeStateLogin;
+    relayClientTransportRealizerInit(&clientRealize, &memory.tagAllocator.info, &guiseTransport, &relayTransport,
+                                     guiseClientLog);
+    relayClientTransportRealizerReInit(&clientRealize, secret.userId, secret.passwordHash);
 
-    GuiseClientState reportedState;
-    reportedState = GuiseClientStateIdle;
-
-    RelayClient relayClient;
-    Clog relayClientLog;
-    relayClientLog.config = &g_clog;
-    relayClientLog.constantPrefix = "RelayClient";
-
-    UdpClientSocket udpClientSocketRelay;
-    udpClientInit(&udpClientSocketRelay, hostToConnectTo, 27005);
-    DatagramTransport transportRelayServer;
-    transportRelayServer.self = &udpClientSocketRelay;
-    transportRelayServer.receive = clientReceive;
-    transportRelayServer.send = clientSend;
-
-    bool hasCreatedRelayClient = false;
-
-    RelayConnector* connector = 0;
-    RelayListener* listener = 0;
-
+    bool hasStartedListen = false;
     while (true) {
         struct timespec ts;
 
@@ -166,55 +145,14 @@ int main(int argc, char* argv[])
         nanosleep(&ts, &ts);
 
         MonotonicTimeMs now = monotonicTimeMsNow();
-        guiseClientRealizeUpdate(&clientRealize, now);
-
-        if (reportedState != clientRealize.client.state) {
-            reportedState = clientRealize.client.state;
-            if (reportedState == GuiseClientStateLoggedIn && !hasCreatedRelayClient) {
-                // Logged in
-                int relayInitErr = relayClientInit(&relayClient, clientRealize.client.mainUserSessionId,
-                                                   transportRelayServer, settings.memory, "relayClient",
-                                                   relayClientLog);
-
-                if (relayInitErr < 0) {
-                    return relayInitErr;
+        relayClientTransportRealizerUpdate(&clientRealize, now);
+        if (clientRealize.state == RelayClientTransportRealizerAuthenticated) {
+            if (!hasStartedListen) {
+                RelayListener* listener = relayClientTransportRealizerStartListen(&clientRealize, 42, 0);
+                if (listener == 0) {
+                    return -99;
                 }
-
-                RelaySerializeApplicationId appId = 42;
-                RelaySerializeChannelId channelId = 1;
-                listener = relayClientStartListen(&relayClient, appId, channelId);
-                hasCreatedRelayClient = true;
-                CLOG_C_DEBUG(&relayClient.log, "start listening %" PRIX64, listener->userSessionId)
-
-                connector = relayClientStartConnect(&relayClient, clientRealize.client.userId, appId, channelId);
-                CLOG_C_DEBUG(&relayClient.log, "start listening %" PRIX64, connector->userSessionId)
-            }
-        }
-
-        if (hasCreatedRelayClient) {
-            int updateErr = relayClientUpdate(&relayClient, monotonicTimeMsNow());
-            if (updateErr < 0) {
-                return updateErr;
-            }
-
-            if (connector != 0 && connector->state == RelayConnectorStateConnected) {
-                relayConnectorSend(connector, (const uint8_t*) "hello", 6);
-            }
-
-            if (listener != 0 && listener->state == RelayListenerStateConnected) {
-                if (listener->connections[0].connectionId != 0) {
-                    relayListenerSendToConnectionIndex(listener, 0, (const uint8_t*) "world!", 7);
-                }
-
-                uint8_t outConnectionIndex;
-                static uint8_t buf[DATAGRAM_TRANSPORT_MAX_SIZE];
-                ssize_t octetCountRead = relayListenerReceivePacket(listener, &outConnectionIndex, buf,
-                                                                    DATAGRAM_TRANSPORT_MAX_SIZE);
-                if (octetCountRead > 0) {
-                    CLOG_C_DEBUG(&relayClient.log,
-                                 "found packet in listener from connectionIndex %hhu octetCount:%zd '%s'",
-                                 outConnectionIndex, octetCountRead, buf)
-                }
+                hasStartedListen = true;
             }
         }
     }
